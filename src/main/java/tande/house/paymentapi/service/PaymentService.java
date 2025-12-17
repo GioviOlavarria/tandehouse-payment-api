@@ -88,6 +88,12 @@ public class PaymentService {
             payment.setAmount(amount);
             payment.setStatus(PaymentStatus.PENDING);
 
+            System.out.println("=== LLAMANDO A FLOW ===");
+            System.out.println("Email: " + email);
+            System.out.println("Amount: " + amount);
+            System.out.println("URL Confirmation: " + urlConfirmation);
+            System.out.println("URL Return: " + urlReturn);
+
             Map<String, Object> flowResp = flowClient.createPayment(
                     commerceOrder,
                     subject,
@@ -97,17 +103,44 @@ public class PaymentService {
                     urlReturn
             );
 
-            String url = String.valueOf(flowResp.get("url"));
-            String token = String.valueOf(flowResp.get("token"));
+            System.out.println("=== PROCESANDO RESPUESTA DE FLOW ===");
+            System.out.println("Response keys: " + flowResp.keySet());
+
+
+            Object urlObj = flowResp.get("url");
+            Object tokenObj = flowResp.get("token");
+
+            if (urlObj == null || tokenObj == null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Flow no devolvió url o token en la respuesta"
+                );
+            }
+
+            String url = String.valueOf(urlObj);
+            String token = String.valueOf(tokenObj);
+
+            if (url.equals("null") || token.equals("null")) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Flow devolvió url o token nulos"
+                );
+            }
 
             payment.setToken(token);
             paymentRepo.save(payment);
 
             String redirectUrl = url + "?token=" + token;
+
+            System.out.println("PAGO CREADO EXITOSAMENTE");
+            System.out.println("Token: " + token);
+            System.out.println("Redirect URL: " + redirectUrl);
+
             return new CreatePaymentResponse(redirectUrl, token);
 
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
-
             System.err.println("ERROR CREANDO PAGO: " + e.getMessage());
             e.printStackTrace();
             throw new ResponseStatusException(

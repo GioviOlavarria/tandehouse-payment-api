@@ -45,17 +45,20 @@ public class FlowClient {
         params.put("subject", subject);
         params.put("currency", "CLP");
         params.put("amount", String.valueOf(amount));
-        params.put("email", email);
+
+        if (email != null && !email.isBlank()) {
+            params.put("email", email);
+        }
+
         params.put("urlConfirmation", urlConfirmation);
         params.put("urlReturn", urlReturn);
-
 
         String signature = sign(params);
         params.put("s", signature);
 
         System.out.println("=== DEBUG FLOW CREATE ===");
-        System.out.println("Params: " + params);
-        System.out.println("Signature: " + signature);
+        System.out.println("Commerce Order: " + commerceOrder);
+        System.out.println("Amount: " + amount);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -78,11 +81,48 @@ public class FlowClient {
                         "Flow create error: " + resp.getStatusCode());
             }
 
-            return (Map<String, Object>) resp.getBody();
+            Map<String, Object> flowResp = resp.getBody();
+
+
+            System.out.println("=== RESPUESTA DE FLOW ===");
+            System.out.println("Body completo: " + flowResp);
+
+
+            Object urlObj = flowResp.get("url");
+            Object tokenObj = flowResp.get("token");
+
+            System.out.println("URL recibida: " + urlObj);
+            System.out.println("Token recibido: " + tokenObj);
+
+            if (urlObj == null || tokenObj == null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Flow no devolvió URL o token. Response: " + flowResp
+                );
+            }
+
+            String url = String.valueOf(urlObj);
+            String token = String.valueOf(tokenObj);
+
+
+            if (url.isBlank() || url.equals("null") || token.isBlank() || token.equals("null")) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Flow devolvió URL o token inválidos. URL: " + url + ", Token: " + token
+                );
+            }
+
+
+            String redirectUrl = url + "?token=" + token;
+
+            System.out.println("URL de redirección generada: " + redirectUrl);
+
+            return flowResp;
 
         } catch (HttpStatusCodeException e) {
             System.err.println("FLOW ERROR STATUS: " + e.getStatusCode());
             System.err.println("FLOW ERROR BODY: " + e.getResponseBodyAsString());
+
             throw new RuntimeException(
                     "FLOW ERROR: " + e.getStatusCode() + " - " + e.getResponseBodyAsString()
             );
