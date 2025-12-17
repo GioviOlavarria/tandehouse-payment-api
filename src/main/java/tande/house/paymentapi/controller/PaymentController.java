@@ -10,15 +10,6 @@ import tande.house.paymentapi.service.PaymentService;
 @RestController
 @RequestMapping("/flow")
 @RequiredArgsConstructor
-@CrossOrigin(
-        origins = {
-                "https://tande-house-migrado-i1fv.vercel.app",
-                "http://localhost:3000",
-                "http://localhost:5173"
-        },
-        allowedHeaders = "*",
-        methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS}
-)
 public class PaymentController {
 
     private final PaymentService paymentService;
@@ -38,7 +29,6 @@ public class PaymentController {
     public VerifyPaymentResponse confirm(@RequestParam("token") String token) {
         return paymentService.verifyPayment(token);
     }
-
 
     @GetMapping("/return")
     public VerifyPaymentResponse handleReturn(@RequestParam("token") String token) {
