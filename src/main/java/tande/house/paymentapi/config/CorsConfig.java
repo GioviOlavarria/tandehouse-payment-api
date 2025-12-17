@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.*;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -15,20 +16,26 @@ public class CorsConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
+        CorsConfiguration cfg = new CorsConfiguration();
 
-        if ("*".equals(allowedOrigins.trim())) {
-            config.setAllowedOriginPatterns(List.of("*"));
+        if (allowedOrigins == null || allowedOrigins.isBlank() || "*".equals(allowedOrigins.trim())) {
+            cfg.setAllowedOriginPatterns(List.of("*"));
         } else {
-            config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
+            cfg.setAllowedOriginPatterns(
+                    Arrays.stream(allowedOrigins.split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isBlank())
+                            .toList()
+            );
         }
 
-        config.setAllowedMethods(List.of("GET","POST","OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
-        config.setAllowCredentials(true);
+        cfg.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
+        cfg.setAllowedHeaders(List.of("Authorization","Content-Type","X-Internal-Key"));
+        cfg.setExposedHeaders(List.of("Authorization"));
+        cfg.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
+        source.registerCorsConfiguration("/**", cfg);
         return source;
     }
 }
