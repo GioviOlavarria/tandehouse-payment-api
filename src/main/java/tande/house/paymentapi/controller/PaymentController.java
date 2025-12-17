@@ -20,17 +20,13 @@ public class PaymentController {
     private String urlReturn;
 
     @PostMapping("/create")
-    public CreatePaymentResponse create(@RequestBody CreatePaymentRequest request) {
-        return paymentService.createPayment(request, urlConfirmation, urlReturn);
+    public CreatePaymentResponse create(@RequestBody CreatePaymentRequest req) {
+        return paymentService.createPayment(req, urlConfirmation, urlReturn);
     }
 
     @PostMapping("/confirm")
     public VerifyPaymentResponse confirm(@RequestParam("token") String token) {
         return paymentService.verifyPayment(token);
     }
-
-    @GetMapping("/status/{commerceOrder}")
-    public PaymentStatusResponse status(@PathVariable String commerceOrder) {
-        return paymentService.getPaymentStatus(commerceOrder);
-    }
 }
+
