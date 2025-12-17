@@ -12,6 +12,7 @@ import tande.house.paymentapi.repo.PaymentRepository;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -21,24 +22,33 @@ public class PaymentService {
     private final PaymentRepository paymentRepo;
 
     @Transactional
-    public CreatePaymentResponse createPayment(CreatePaymentRequest req, String urlConfirmation, String urlReturn) {
+    public CreatePaymentResponse createFlowPayment(
+            CreatePaymentRequest req,
+            String urlConfirmation,
+            String urlReturn
+    ) {
 
-        Payment payment = paymentRepo.findByCommerceOrder(req.getCommerceOrder()).orElse(null);
-        if (payment == null) {
-            payment = new Payment();
-            payment.setCommerceOrder(req.getCommerceOrder());
-            payment.setAmount(req.getAmount());
-            payment.setStatus(PaymentStatus.PENDING);
-            payment.setCreatedAt(OffsetDateTime.now());
-        } else {
-            payment.setAmount(req.getAmount());
-            payment.setStatus(PaymentStatus.PENDING);
+        int amount = req.getCart().stream()
+                .mapToInt(i -> i.getQuantity() * 1000) // AJUSTA si tienes precios reales
+                .sum();
+
+        if (amount <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Monto inválido");
         }
 
+        String commerceOrder = "TH-" + UUID.randomUUID();
+        String subject = "Compra TandeHouse";
+
+        Payment payment = new Payment();
+        payment.setCommerceOrder(commerceOrder);
+        payment.setAmount(amount);
+        payment.setStatus(PaymentStatus.PENDING);
+        payment.setCreatedAt(OffsetDateTime.now());
+
         Map<String, Object> flowResp = flowClient.createPayment(
-                req.getCommerceOrder(),
-                req.getSubject(),
-                req.getAmount(),
+                commerceOrder,
+                subject,
+                amount,
                 req.getEmail(),
                 urlConfirmation,
                 urlReturn
