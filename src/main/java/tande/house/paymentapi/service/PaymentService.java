@@ -1,18 +1,25 @@
 package tande.house.paymentapi.service;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
-import tande.house.paymentapi.dto.*;
+import tande.house.paymentapi.dto.CreatePaymentRequest;
+import tande.house.paymentapi.dto.CreatePaymentResponse;
+import tande.house.paymentapi.dto.PaymentStatusResponse;
+import tande.house.paymentapi.dto.VerifyPaymentResponse;
 import tande.house.paymentapi.model.Payment;
 import tande.house.paymentapi.model.PaymentStatus;
 import tande.house.paymentapi.repo.PaymentRepository;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
-import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -21,23 +28,23 @@ public class PaymentService {
     private final FlowClient flowClient;
     private final PaymentRepository paymentRepo;
 
+    private final RestTemplate http = new RestTemplate();
+
+    @Value("${services.product}")
+    private String productServiceUrl;
+
+    @Value("${internal.serviceKey}")
+    private String internalServiceKey;
+
+    private static final Pattern DIGITS = Pattern.compile("(\\d+)");
+
     @Transactional
-    public CreatePaymentResponse createFlowPayment(
-            CreatePaymentRequest req,
-            String urlConfirmation,
-            String urlReturn
-    ) {
+    public CreatePaymentResponse createPayment(CreatePaymentRequest req, String urlConfirmation, String urlReturn) {
 
-        int amount = req.getCart().stream()
-                .mapToInt(i -> i.getQuantity() * 1000)
-                .sum();
+        int amount = calculateTotalAmount(req);
 
-        if (amount <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Monto inválido");
-        }
-
-        String commerceOrder = "TH-" + UUID.randomUUID();
-        String subject = "Compra TandeHouse";
+        String commerceOrder = "TH-" + req.getUserId() + "-" + System.currentTimeMillis();
+        String subject = "Compra TandeHouse " + commerceOrder;
 
         Payment payment = new Payment();
         payment.setCommerceOrder(commerceOrder);
@@ -45,23 +52,81 @@ public class PaymentService {
         payment.setStatus(PaymentStatus.PENDING);
         payment.setCreatedAt(OffsetDateTime.now());
 
-        Map<String, Object> flowResp = flowClient.createPayment(
-                commerceOrder,
-                subject,
-                amount,
-                req.getEmail(),
-                urlConfirmation,
-                urlReturn
+        try {
+            Map<String, Object> flowResp = flowClient.createPayment(
+                    commerceOrder,
+                    subject,
+                    amount,
+                    req.getEmail(),
+                    urlConfirmation,
+                    urlReturn
+            );
+
+            String url = String.valueOf(flowResp.get("url"));
+            String token = String.valueOf(flowResp.get("token"));
+
+            payment.setToken(token);
+            paymentRepo.save(payment);
+
+            String redirectUrl = url + "?token=" + token;
+            return new CreatePaymentResponse(redirectUrl, token);
+
+        } catch (HttpClientErrorException e) {
+
+            throw new ResponseStatusException(e.getStatusCode(), e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Error al comunicarse con Flow", e);
+        }
+    }
+
+    private int calculateTotalAmount(CreatePaymentRequest req) {
+        int total = 0;
+
+        for (CreatePaymentRequest.CartItem item : req.getCart()) {
+            long pid = normalizeProductIdToLong(item.getProductId());
+
+            int price = fetchProductPrice(pid);
+            total += price * item.getQuantity();
+        }
+
+        if (total <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Total inválido");
+        return total;
+    }
+
+    private long normalizeProductIdToLong(String raw) {
+        if (raw == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId vacío");
+
+
+        Matcher m = DIGITS.matcher(raw);
+        if (!m.find()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId inválido: " + raw);
+        return Long.parseLong(m.group(1));
+    }
+
+    private int fetchProductPrice(long productId) {
+        String url = productServiceUrl + "/products/" + productId;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Key", internalServiceKey);
+
+        ResponseEntity<Map> resp = http.exchange(
+                url,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                Map.class
         );
 
-        String url = String.valueOf(flowResp.get("url"));
-        String token = String.valueOf(flowResp.get("token"));
+        if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Producto no encontrado: " + productId);
+        }
 
-        payment.setToken(token);
-        paymentRepo.save(payment);
+        Object precio = resp.getBody().get("precio");
+        if (precio == null) precio = resp.getBody().get("price");
+        if (precio == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Producto sin precio: " + productId);
+        }
 
-        String redirectUrl = url + "?token=" + token;
-        return new CreatePaymentResponse(redirectUrl, token);
+        if (precio instanceof Number n) return n.intValue();
+        return Integer.parseInt(String.valueOf(precio));
     }
 
     @Transactional
@@ -84,13 +149,9 @@ public class PaymentService {
         }
 
         PaymentStatus newStatus;
-        if ("2".equals(statusRaw) || "PAID".equalsIgnoreCase(statusRaw)) {
-            newStatus = PaymentStatus.PAID;
-        } else if ("3".equals(statusRaw) || "4".equals(statusRaw) || "FAILED".equalsIgnoreCase(statusRaw)) {
-            newStatus = PaymentStatus.FAILED;
-        } else {
-            newStatus = PaymentStatus.PENDING;
-        }
+        if ("2".equals(statusRaw) || "PAID".equalsIgnoreCase(statusRaw)) newStatus = PaymentStatus.PAID;
+        else if ("3".equals(statusRaw) || "4".equals(statusRaw) || "FAILED".equalsIgnoreCase(statusRaw)) newStatus = PaymentStatus.FAILED;
+        else newStatus = PaymentStatus.PENDING;
 
         payment.setStatus(newStatus);
         paymentRepo.save(payment);
