@@ -6,6 +6,7 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -47,6 +48,7 @@ public class FlowClient {
         params.put("email", email);
         params.put("urlConfirmation", urlConfirmation);
         params.put("urlReturn", urlReturn);
+
         params.put("s", sign(params));
 
         HttpHeaders headers = new HttpHeaders();
@@ -70,7 +72,7 @@ public class FlowClient {
             }
 
             return (Map<String, Object>) resp.getBody();
-        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+        } catch (HttpStatusCodeException e) {
 
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
@@ -80,20 +82,28 @@ public class FlowClient {
         }
     }
 
-
     public Map<String, Object> getStatus(String token) {
         Map<String, String> params = new HashMap<>();
         params.put("apiKey", apiKey);
         params.put("token", token);
+
         params.put("s", sign(params));
 
         String url = baseUrl + "/payment/getStatus?" + toQuery(params);
 
-        ResponseEntity<Map> resp = http.getForEntity(url, Map.class);
-        if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-            throw new RuntimeException("Flow getStatus error: " + resp.getStatusCode());
+        try {
+            ResponseEntity<Map> resp = http.getForEntity(url, Map.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Flow getStatus error: " + resp.getStatusCode());
+            }
+            return (Map<String, Object>) resp.getBody();
+        } catch (HttpStatusCodeException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "Flow error: " + e.getStatusCode() + " body=" + e.getResponseBodyAsString(),
+                    e
+            );
         }
-        return (Map<String, Object>) resp.getBody();
     }
 
     private String toQuery(Map<String, String> params) {
@@ -103,10 +113,7 @@ public class FlowClient {
         StringBuilder sb = new StringBuilder();
         for (String k : keys) {
             String v = params.get(k);
-            sb.append(URLEncoder.encode(k, StandardCharsets.UTF_8))
-                    .append("=")
-                    .append(URLEncoder.encode(v == null ? "" : v, StandardCharsets.UTF_8))
-                    .append("&");
+            sb.append(enc(k)).append("=").append(enc(v == null ? "" : v)).append("&");
         }
         if (!sb.isEmpty()) sb.setLength(sb.length() - 1);
         return sb.toString();
@@ -118,15 +125,20 @@ public class FlowClient {
         keys.remove("s");
         Collections.sort(keys);
 
-        StringBuilder toSign = new StringBuilder();
+        StringBuilder canonical = new StringBuilder();
         for (String k : keys) {
-            toSign.append(k).append(params.get(k) == null ? "" : params.get(k));
+            String v = params.get(k);
+            canonical.append(enc(k))
+                    .append("=")
+                    .append(enc(v == null ? "" : v))
+                    .append("&");
         }
+        if (!canonical.isEmpty()) canonical.setLength(canonical.length() - 1);
 
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] raw = mac.doFinal(toSign.toString().getBytes(StandardCharsets.UTF_8));
+            byte[] raw = mac.doFinal(canonical.toString().getBytes(StandardCharsets.UTF_8));
 
             StringBuilder hex = new StringBuilder(raw.length * 2);
             for (byte b : raw) hex.append(String.format("%02x", b));
@@ -134,5 +146,9 @@ public class FlowClient {
         } catch (Exception e) {
             throw new RuntimeException("Error signing Flow request", e);
         }
+    }
+
+    private String enc(String s) {
+        return URLEncoder.encode(s == null ? "" : s, StandardCharsets.UTF_8);
     }
 }
