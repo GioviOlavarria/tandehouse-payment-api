@@ -21,7 +21,7 @@ public class PaymentController {
     @Value("${app.flow.urlReturn}")
     private String urlReturn;
 
-    @PostMapping("/flow/create")
+    @PostMapping("/create")
     public ResponseEntity<CreatePaymentResponse> create(
             @Valid @RequestBody CreatePaymentRequest request
     ) {
@@ -33,7 +33,6 @@ public class PaymentController {
                 )
         );
     }
-
 
     @PostMapping("/confirm")
     public VerifyPaymentResponse confirm(@RequestParam("token") String token) {
