@@ -29,7 +29,7 @@ public class PaymentService {
     ) {
 
         int amount = req.getCart().stream()
-                .mapToInt(i -> i.getQuantity() * 1000) // AJUSTA si tienes precios reales
+                .mapToInt(i -> i.getQuantity() * 1000)
                 .sum();
 
         if (amount <= 0) {
