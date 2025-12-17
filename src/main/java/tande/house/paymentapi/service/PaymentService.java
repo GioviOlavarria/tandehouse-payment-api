@@ -39,6 +39,7 @@ public class PaymentService {
                 req.getCommerceOrder(),
                 req.getSubject(),
                 req.getAmount(),
+                req.getEmail(),
                 urlConfirmation,
                 urlReturn
         );

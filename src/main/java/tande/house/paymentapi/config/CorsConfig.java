@@ -15,21 +15,17 @@ public class CorsConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
 
-
         cfg.setAllowedOrigins(List.of(
                 "https://tande-house-migrado-i1fv.vercel.app",
                 "http://localhost:3000",
                 "http://localhost:5173"
         ));
 
-        cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-
-
-        cfg.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        cfg.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
+        cfg.setAllowedHeaders(List.of("Authorization","Content-Type","X-Internal-Key"));
 
 
         cfg.setAllowCredentials(false);
-
 
         cfg.setMaxAge(3600L);
 

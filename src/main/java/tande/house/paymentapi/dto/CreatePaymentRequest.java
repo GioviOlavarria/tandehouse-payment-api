@@ -1,10 +1,15 @@
 package tande.house.paymentapi.dto;
 
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import lombok.Getter;
-import lombok.Setter;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
 
-@Getter @Setter
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class CreatePaymentRequest {
 
     @NotBlank
@@ -13,5 +18,10 @@ public class CreatePaymentRequest {
     @NotBlank
     private String subject;
 
+    @Min(1)
     private int amount;
+
+    @NotBlank
+    @Email
+    private String email;
 }
