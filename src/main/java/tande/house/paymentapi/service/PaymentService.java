@@ -30,44 +30,34 @@ public class PaymentService {
     @Transactional
     public CreatePaymentResponse createPayment(CreatePaymentRequest req, String urlConfirmation, String urlReturn) {
 
-
         String email = req.getEmail() == null ? null : req.getEmail().trim();
         if (email == null || email.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "email es requerido");
         }
-        // --- MODO 1: viene “flow-like” (commerceOrder/subject/amount)
-        if (req.getCommerceOrder() != null && req.getSubject() != null && req.getAmount() != null) {
 
-            String commerceOrder = req.getCommerceOrder();
-            String subject = req.getSubject();
+
+        if (req.getCommerceOrder() != null && req.getSubject() != null && req.getAmount() != null) {
+            String commerceOrder = req.getCommerceOrder().trim();
+            String subject = req.getSubject().trim();
             int amount = req.getAmount();
 
-            if (amount <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount inválido");
+
+            if (commerceOrder.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "commerceOrder no puede estar vacío");
+            }
+            if (subject.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "subject no puede estar vacío");
+            }
+            if (amount <= 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount inválido");
+            }
 
             return createFlow(commerceOrder, subject, amount, email, urlConfirmation, urlReturn);
         }
 
-
-        if (req.getUserId() != null && req.getCart() != null && !req.getCart().isEmpty()) {
-
-
-            int amount = 0;
-            for (CreatePaymentRequest.CartItem it : req.getCart()) {
-                if (it == null || it.getQuantity() == null || it.getQuantity() <= 0)
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "quantity inválida");
-
-
-            }
-
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "El backend recibió cart pero no puede calcular amount sin consultar Product Service. Envíame amount o conectamos Product Service."
-            );
-        }
-
         throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
-                "Body inválido. Enviar (commerceOrder, subject, amount, email) o (userId, cart[], email)."
+                "Body inválido. Enviar (commerceOrder, subject, amount, email)."
         );
     }
 
@@ -79,32 +69,52 @@ public class PaymentService {
             String urlConfirmation,
             String urlReturn
     ) {
-        Payment payment = paymentRepo.findByCommerceOrder(commerceOrder).orElse(null);
-        if (payment == null) {
-            payment = new Payment();
-            payment.setCommerceOrder(commerceOrder);
-            payment.setCreatedAt(OffsetDateTime.now());
+        if (urlConfirmation == null || urlConfirmation.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "URL de confirmación no configurada");
         }
-        payment.setAmount(amount);
-        payment.setStatus(PaymentStatus.PENDING);
+        if (urlReturn == null || urlReturn.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "URL de retorno no configurada");
+        }
 
-        Map<String, Object> flowResp = flowClient.createPayment(
-                commerceOrder,
-                subject,
-                amount,
-                email,
-                urlConfirmation,
-                urlReturn
-        );
+        try {
+            Payment payment = paymentRepo.findByCommerceOrder(commerceOrder).orElse(null);
+            if (payment == null) {
+                payment = new Payment();
+                payment.setCommerceOrder(commerceOrder);
+                payment.setCreatedAt(OffsetDateTime.now());
+            }
+            payment.setAmount(amount);
+            payment.setStatus(PaymentStatus.PENDING);
 
-        String url = String.valueOf(flowResp.get("url"));
-        String token = String.valueOf(flowResp.get("token"));
+            Map<String, Object> flowResp = flowClient.createPayment(
+                    commerceOrder,
+                    subject,
+                    amount,
+                    email,
+                    urlConfirmation,
+                    urlReturn
+            );
 
-        payment.setToken(token);
-        paymentRepo.save(payment);
+            String url = String.valueOf(flowResp.get("url"));
+            String token = String.valueOf(flowResp.get("token"));
 
-        String redirectUrl = url + "?token=" + token;
-        return new CreatePaymentResponse(redirectUrl, token);
+            payment.setToken(token);
+            paymentRepo.save(payment);
+
+            String redirectUrl = url + "?token=" + token;
+            return new CreatePaymentResponse(redirectUrl, token);
+
+        } catch (Exception e) {
+
+            System.err.println("ERROR CREANDO PAGO: " + e.getMessage());
+            e.printStackTrace();
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Error al crear pago: " + e.getMessage()
+            );
+        }
     }
 
     @Transactional

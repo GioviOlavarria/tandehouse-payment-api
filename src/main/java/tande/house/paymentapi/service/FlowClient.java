@@ -39,7 +39,7 @@ public class FlowClient {
             String urlConfirmation,
             String urlReturn
     ) {
-        Map<String, String> params = new HashMap<>();
+        Map<String, String> params = new LinkedHashMap<>();
         params.put("apiKey", apiKey);
         params.put("commerceOrder", commerceOrder);
         params.put("subject", subject);
@@ -49,7 +49,13 @@ public class FlowClient {
         params.put("urlConfirmation", urlConfirmation);
         params.put("urlReturn", urlReturn);
 
-        params.put("s", sign(params));
+
+        String signature = sign(params);
+        params.put("s", signature);
+
+        System.out.println("=== DEBUG FLOW CREATE ===");
+        System.out.println("Params: " + params);
+        System.out.println("Signature: " + signature);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -68,33 +74,39 @@ public class FlowClient {
             );
 
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Flow create error: " + resp.getStatusCode());
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Flow create error: " + resp.getStatusCode());
             }
 
             return (Map<String, Object>) resp.getBody();
+
         } catch (HttpStatusCodeException e) {
             System.err.println("FLOW ERROR STATUS: " + e.getStatusCode());
             System.err.println("FLOW ERROR BODY: " + e.getResponseBodyAsString());
-
             throw new RuntimeException(
-                    "FLOW ERROR: " + e.getStatusCode() + " BODY: " + e.getResponseBodyAsString()
+                    "FLOW ERROR: " + e.getStatusCode() + " - " + e.getResponseBodyAsString()
             );
         }
     }
 
     public Map<String, Object> getStatus(String token) {
-        Map<String, String> params = new HashMap<>();
+        Map<String, String> params = new LinkedHashMap<>();
         params.put("apiKey", apiKey);
         params.put("token", token);
 
-        params.put("s", sign(params));
+        String signature = sign(params);
+        params.put("s", signature);
 
         String url = baseUrl + "/payment/getStatus?" + toQuery(params);
+
+        System.out.println("=== DEBUG FLOW GET STATUS ===");
+        System.out.println("URL: " + url);
 
         try {
             ResponseEntity<Map> resp = http.getForEntity(url, Map.class);
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Flow getStatus error: " + resp.getStatusCode());
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Flow getStatus error: " + resp.getStatusCode());
             }
             return (Map<String, Object>) resp.getBody();
         } catch (HttpStatusCodeException e) {
@@ -113,11 +125,16 @@ public class FlowClient {
         StringBuilder sb = new StringBuilder();
         for (String k : keys) {
             String v = params.get(k);
-            sb.append(enc(k)).append("=").append(enc(v == null ? "" : v)).append("&");
+            if (v != null && !v.isEmpty()) {
+                sb.append(urlEncode(k)).append("=").append(urlEncode(v)).append("&");
+            }
         }
-        if (!sb.isEmpty()) sb.setLength(sb.length() - 1);
+        if (sb.length() > 0) {
+            sb.setLength(sb.length() - 1);
+        }
         return sb.toString();
     }
+
 
     private String sign(Map<String, String> params) {
 
@@ -125,30 +142,55 @@ public class FlowClient {
         keys.remove("s");
         Collections.sort(keys);
 
+
         StringBuilder canonical = new StringBuilder();
-        for (String k : keys) {
+        for (int i = 0; i < keys.size(); i++) {
+            String k = keys.get(i);
             String v = params.get(k);
-            canonical.append(enc(k))
-                    .append("=")
-                    .append(enc(v == null ? "" : v))
-                    .append("&");
+
+            if (v != null && !v.isEmpty()) {
+                canonical.append(k).append(v);
+            }
         }
-        if (!canonical.isEmpty()) canonical.setLength(canonical.length() - 1);
+
+        String dataToSign = canonical.toString();
+        System.out.println("=== SIGNATURE DEBUG ===");
+        System.out.println("Data to sign: " + dataToSign);
+        System.out.println("Secret key: " + secretKey);
 
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] raw = mac.doFinal(canonical.toString().getBytes(StandardCharsets.UTF_8));
+            SecretKeySpec secretKeySpec = new SecretKeySpec(
+                    secretKey.getBytes(StandardCharsets.UTF_8),
+                    "HmacSHA256"
+            );
+            mac.init(secretKeySpec);
 
-            StringBuilder hex = new StringBuilder(raw.length * 2);
-            for (byte b : raw) hex.append(String.format("%02x", b));
-            return hex.toString();
+            byte[] rawHmac = mac.doFinal(dataToSign.getBytes(StandardCharsets.UTF_8));
+
+            // Convertir a hexadecimal
+            StringBuilder hex = new StringBuilder(rawHmac.length * 2);
+            for (byte b : rawHmac) {
+                hex.append(String.format("%02x", b));
+            }
+
+            String signature = hex.toString();
+            System.out.println("Signature generada: " + signature);
+
+            return signature;
+
         } catch (Exception e) {
+            System.err.println("ERROR GENERANDO FIRMA: " + e.getMessage());
+            e.printStackTrace();
             throw new RuntimeException("Error signing Flow request", e);
         }
     }
 
-    private String enc(String s) {
-        return URLEncoder.encode(s == null ? "" : s, StandardCharsets.UTF_8);
+
+    private String urlEncode(String s) {
+        if (s == null || s.isEmpty()) {
+            return "";
+        }
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 }
