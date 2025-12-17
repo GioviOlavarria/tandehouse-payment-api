@@ -73,11 +73,11 @@ public class FlowClient {
 
             return (Map<String, Object>) resp.getBody();
         } catch (HttpStatusCodeException e) {
+            System.err.println("FLOW ERROR STATUS: " + e.getStatusCode());
+            System.err.println("FLOW ERROR BODY: " + e.getResponseBodyAsString());
 
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY,
-                    "Flow error: " + e.getStatusCode() + " body=" + e.getResponseBodyAsString(),
-                    e
+            throw new RuntimeException(
+                    "FLOW ERROR: " + e.getStatusCode() + " BODY: " + e.getResponseBodyAsString()
             );
         }
     }
