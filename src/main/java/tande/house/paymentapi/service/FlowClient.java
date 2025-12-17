@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -37,7 +38,6 @@ public class FlowClient {
             String urlConfirmation,
             String urlReturn
     ) {
-        // ✅ mutable
         Map<String, String> params = new HashMap<>();
         params.put("apiKey", apiKey);
         params.put("commerceOrder", commerceOrder);
@@ -47,7 +47,6 @@ public class FlowClient {
         params.put("email", email);
         params.put("urlConfirmation", urlConfirmation);
         params.put("urlReturn", urlReturn);
-
         params.put("s", sign(params));
 
         HttpHeaders headers = new HttpHeaders();
@@ -58,18 +57,29 @@ public class FlowClient {
 
         HttpEntity<MultiValueMap<String, String>> req = new HttpEntity<>(form, headers);
 
-        ResponseEntity<Map> resp = http.exchange(
-                baseUrl + "/payment/create",
-                HttpMethod.POST,
-                req,
-                Map.class
-        );
+        try {
+            ResponseEntity<Map> resp = http.exchange(
+                    baseUrl + "/payment/create",
+                    HttpMethod.POST,
+                    req,
+                    Map.class
+            );
 
-        if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-            throw new RuntimeException("Flow create error: " + resp.getStatusCode());
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Flow create error: " + resp.getStatusCode());
+            }
+
+            return (Map<String, Object>) resp.getBody();
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "Flow error: " + e.getStatusCode() + " body=" + e.getResponseBodyAsString(),
+                    e
+            );
         }
-        return (Map<String, Object>) resp.getBody();
     }
+
 
     public Map<String, Object> getStatus(String token) {
         Map<String, String> params = new HashMap<>();
