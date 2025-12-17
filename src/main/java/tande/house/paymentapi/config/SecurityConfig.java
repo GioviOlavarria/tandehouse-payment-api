@@ -19,18 +19,9 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-
-
                         .requestMatchers("/flow/**").permitAll()
-
-
-                        .requestMatchers("/actuator/health").permitAll()
-
-
                         .anyRequest().authenticated()
                 )
-                .httpBasic(b -> b.disable())
-                .formLogin(f -> f.disable())
                 .build();
     }
 }
