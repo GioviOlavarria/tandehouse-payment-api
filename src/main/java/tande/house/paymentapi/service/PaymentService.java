@@ -1,12 +1,9 @@
 package tande.house.paymentapi.service;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import tande.house.paymentapi.dto.CreatePaymentRequest;
 import tande.house.paymentapi.dto.CreatePaymentResponse;
@@ -28,105 +25,86 @@ public class PaymentService {
     private final FlowClient flowClient;
     private final PaymentRepository paymentRepo;
 
-    private final RestTemplate http = new RestTemplate();
-
-    @Value("${services.product}")
-    private String productServiceUrl;
-
-    @Value("${internal.serviceKey}")
-    private String internalServiceKey;
-
     private static final Pattern DIGITS = Pattern.compile("(\\d+)");
 
     @Transactional
     public CreatePaymentResponse createPayment(CreatePaymentRequest req, String urlConfirmation, String urlReturn) {
 
-        int amount = calculateTotalAmount(req);
 
-        String commerceOrder = "TH-" + req.getUserId() + "-" + System.currentTimeMillis();
-        String subject = "Compra TandeHouse " + commerceOrder;
+        String email = req.getEmail() == null ? null : req.getEmail().trim();
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "email es requerido");
+        }
+        // --- MODO 1: viene “flow-like” (commerceOrder/subject/amount)
+        if (req.getCommerceOrder() != null && req.getSubject() != null && req.getAmount() != null) {
 
-        Payment payment = new Payment();
-        payment.setCommerceOrder(commerceOrder);
+            String commerceOrder = req.getCommerceOrder();
+            String subject = req.getSubject();
+            int amount = req.getAmount();
+
+            if (amount <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount inválido");
+
+            return createFlow(commerceOrder, subject, amount, email, urlConfirmation, urlReturn);
+        }
+
+
+        if (req.getUserId() != null && req.getCart() != null && !req.getCart().isEmpty()) {
+
+
+            int amount = 0;
+            for (CreatePaymentRequest.CartItem it : req.getCart()) {
+                if (it == null || it.getQuantity() == null || it.getQuantity() <= 0)
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "quantity inválida");
+
+
+            }
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "El backend recibió cart pero no puede calcular amount sin consultar Product Service. Envíame amount o conectamos Product Service."
+            );
+        }
+
+        throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Body inválido. Enviar (commerceOrder, subject, amount, email) o (userId, cart[], email)."
+        );
+    }
+
+    private CreatePaymentResponse createFlow(
+            String commerceOrder,
+            String subject,
+            int amount,
+            String email,
+            String urlConfirmation,
+            String urlReturn
+    ) {
+        Payment payment = paymentRepo.findByCommerceOrder(commerceOrder).orElse(null);
+        if (payment == null) {
+            payment = new Payment();
+            payment.setCommerceOrder(commerceOrder);
+            payment.setCreatedAt(OffsetDateTime.now());
+        }
         payment.setAmount(amount);
         payment.setStatus(PaymentStatus.PENDING);
-        payment.setCreatedAt(OffsetDateTime.now());
 
-        try {
-            Map<String, Object> flowResp = flowClient.createPayment(
-                    commerceOrder,
-                    subject,
-                    amount,
-                    req.getEmail(),
-                    urlConfirmation,
-                    urlReturn
-            );
-
-            String url = String.valueOf(flowResp.get("url"));
-            String token = String.valueOf(flowResp.get("token"));
-
-            payment.setToken(token);
-            paymentRepo.save(payment);
-
-            String redirectUrl = url + "?token=" + token;
-            return new CreatePaymentResponse(redirectUrl, token);
-
-        } catch (HttpClientErrorException e) {
-
-            throw new ResponseStatusException(e.getStatusCode(), e.getResponseBodyAsString(), e);
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Error al comunicarse con Flow", e);
-        }
-    }
-
-    private int calculateTotalAmount(CreatePaymentRequest req) {
-        int total = 0;
-
-        for (CreatePaymentRequest.CartItem item : req.getCart()) {
-            long pid = normalizeProductIdToLong(item.getProductId());
-
-            int price = fetchProductPrice(pid);
-            total += price * item.getQuantity();
-        }
-
-        if (total <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Total inválido");
-        return total;
-    }
-
-    private long normalizeProductIdToLong(String raw) {
-        if (raw == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId vacío");
-
-
-        Matcher m = DIGITS.matcher(raw);
-        if (!m.find()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId inválido: " + raw);
-        return Long.parseLong(m.group(1));
-    }
-
-    private int fetchProductPrice(long productId) {
-        String url = productServiceUrl + "/products/" + productId;
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-Internal-Key", internalServiceKey);
-
-        ResponseEntity<Map> resp = http.exchange(
-                url,
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                Map.class
+        Map<String, Object> flowResp = flowClient.createPayment(
+                commerceOrder,
+                subject,
+                amount,
+                email,
+                urlConfirmation,
+                urlReturn
         );
 
-        if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Producto no encontrado: " + productId);
-        }
+        String url = String.valueOf(flowResp.get("url"));
+        String token = String.valueOf(flowResp.get("token"));
 
-        Object precio = resp.getBody().get("precio");
-        if (precio == null) precio = resp.getBody().get("price");
-        if (precio == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Producto sin precio: " + productId);
-        }
+        payment.setToken(token);
+        paymentRepo.save(payment);
 
-        if (precio instanceof Number n) return n.intValue();
-        return Integer.parseInt(String.valueOf(precio));
+        String redirectUrl = url + "?token=" + token;
+        return new CreatePaymentResponse(redirectUrl, token);
     }
 
     @Transactional
@@ -170,5 +148,12 @@ public class PaymentService {
                 payment.getAmount(),
                 payment.getToken()
         );
+    }
+
+    private long normalizeProductIdToLong(String raw) {
+        if (raw == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId vacío");
+        Matcher m = DIGITS.matcher(raw);
+        if (!m.find()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productId inválido: " + raw);
+        return Long.parseLong(m.group(1));
     }
 }
