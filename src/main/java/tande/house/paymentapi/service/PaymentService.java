@@ -17,57 +17,86 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PaymentService {
 
-    private final PaymentRepository paymentRepo;
     private final FlowClient flowClient;
+    private final PaymentRepository paymentRepo;
 
     @Transactional
-    public CreatePaymentResponse createPayment(CreatePaymentRequest request, String urlConfirmation, String urlReturn) {
-        String commerceOrder = request.getCommerceOrder();
-        String subject = request.getSubject();
-        int amount = request.getAmount();
+    public CreatePaymentResponse createPayment(CreatePaymentRequest req, String urlConfirmation, String urlReturn) {
 
+        Payment payment = paymentRepo.findByCommerceOrder(req.getCommerceOrder()).orElse(null);
+        if (payment == null) {
+            payment = new Payment();
+            payment.setCommerceOrder(req.getCommerceOrder());
+            payment.setAmount(req.getAmount());
+            payment.setStatus(PaymentStatus.PENDING);
+            payment.setCreatedAt(OffsetDateTime.now());
+        } else {
+            payment.setAmount(req.getAmount());
+            payment.setStatus(PaymentStatus.PENDING);
+        }
 
-        Map<String, Object> flowResp = flowClient.createPayment(commerceOrder, subject, amount, "email@example.com", urlConfirmation, urlReturn);
+        Map<String, Object> flowResp = flowClient.createPayment(
+                req.getCommerceOrder(),
+                req.getSubject(),
+                req.getAmount(),
+                urlConfirmation,
+                urlReturn
+        );
 
+        String url = String.valueOf(flowResp.get("url"));
         String token = String.valueOf(flowResp.get("token"));
 
-
-        Payment payment = new Payment();
-        payment.setCommerceOrder(commerceOrder);
         payment.setToken(token);
-        payment.setStatus(PaymentStatus.PENDING);
-        payment.setAmount(amount);
-        payment.setCreatedAt(OffsetDateTime.now());
         paymentRepo.save(payment);
 
-        return new CreatePaymentResponse(
-                String.valueOf(flowResp.get("url")),
-                token
-        );
+        String redirectUrl = url + "?token=" + token;
+        return new CreatePaymentResponse(redirectUrl, token);
     }
 
     @Transactional
     public VerifyPaymentResponse verifyPayment(String token) {
-
         Map<String, Object> flowResp = flowClient.getStatus(token);
-        String status = String.valueOf(flowResp.get("status"));
 
-        if ("PAID".equals(status)) {
-            // Update payment status in DB
-            Payment payment = paymentRepo.findByToken(token)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found"));
-            payment.setStatus(PaymentStatus.PAID);
-            paymentRepo.save(payment);
+        String statusRaw = String.valueOf(flowResp.get("status"));
+        String commerceOrder = String.valueOf(flowResp.get("commerceOrder"));
+
+        Payment payment = paymentRepo.findByToken(token).orElse(null);
+        if (payment == null && commerceOrder != null && !commerceOrder.isBlank()) {
+            payment = paymentRepo.findByCommerceOrder(commerceOrder).orElse(null);
+        }
+        if (payment == null) {
+            payment = new Payment();
+            payment.setCommerceOrder(commerceOrder);
+            payment.setAmount(0);
+            payment.setToken(token);
+            payment.setCreatedAt(OffsetDateTime.now());
         }
 
-        return new VerifyPaymentResponse(status, String.valueOf(flowResp.get("commerceOrder")), token);
+        PaymentStatus newStatus;
+        if ("2".equals(statusRaw) || "PAID".equalsIgnoreCase(statusRaw)) {
+            newStatus = PaymentStatus.PAID;
+        } else if ("3".equals(statusRaw) || "4".equals(statusRaw) || "FAILED".equalsIgnoreCase(statusRaw)) {
+            newStatus = PaymentStatus.FAILED;
+        } else {
+            newStatus = PaymentStatus.PENDING;
+        }
+
+        payment.setStatus(newStatus);
+        paymentRepo.save(payment);
+
+        return new VerifyPaymentResponse(newStatus.name(), payment.getCommerceOrder(), token);
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public PaymentStatusResponse getPaymentStatus(String commerceOrder) {
         Payment payment = paymentRepo.findByCommerceOrder(commerceOrder)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found"));
 
-        return new PaymentStatusResponse(payment.getStatus().name(), payment.getCommerceOrder(), payment.getAmount(), payment.getToken());
+        return new PaymentStatusResponse(
+                payment.getStatus().name(),
+                payment.getCommerceOrder(),
+                payment.getAmount(),
+                payment.getToken()
+        );
     }
 }

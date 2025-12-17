@@ -5,8 +5,10 @@ import lombok.*;
 
 import java.time.OffsetDateTime;
 
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "payments")
 public class Payment {
