@@ -1,36 +1,38 @@
-package tande.house.paymentapi.config;
+package tande.house.billingapi.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.cors.*;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 public class CorsConfig {
 
+    @Value("${app.cors.allowedOrigins:*}")
+    private String allowedOrigins;
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration cfg = new CorsConfiguration();
+        CorsConfiguration config = new CorsConfiguration();
 
-        cfg.setAllowedOrigins(List.of(
-                "https://tande-house-migrado-i1fv.vercel.app",
-                "http://localhost:3000",
-                "http://localhost:5173"
-        ));
+        if ("*".equals(allowedOrigins.trim())) {
+            config.setAllowedOriginPatterns(Arrays.asList("*"));
+            config.setAllowCredentials(false);
+        } else {
+            config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+            config.setAllowCredentials(true);
+        }
 
-        cfg.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        cfg.setAllowedHeaders(List.of("Authorization","Content-Type","X-Internal-Key"));
-
-
-        cfg.setAllowCredentials(false);
-
-        cfg.setMaxAge(3600L);
+        config.setAllowedMethods(Arrays.asList("GET","POST","PUT","DELETE","OPTIONS"));
+        config.setAllowedHeaders(Arrays.asList("*"));
+        config.setExposedHeaders(Arrays.asList("*"));
+        config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", cfg);
+        source.registerCorsConfiguration("/**", config);
         return source;
     }
 }
